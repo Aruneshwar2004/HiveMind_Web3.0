@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.11;
+
+contract Mind {
+    string public ideaname;
+    string public description;
+    string public domain;
+    address public creator;
+
+    constructor() {
+        creator = msg.sender;
+    }
+
+    function setName(string memory idea, string memory desc, string memory dom) public {
+        require(msg.sender == creator, "Only the creator can modify the idea details");
+        ideaname = idea;
+        description = desc;
+        domain = dom;
+    }
+}
+
+contract ApprovalProcess {
+    string public approved;
+    address public contractAddress;
+    address public creator;
+
+    constructor(address _contractAddress) {
+        contractAddress = _contractAddress;
+        creator = msg.sender;
+    }
+
+    function approve(string memory result) public {
+        require(msg.sender == creator, "Only the creator can approve the patent");
+        approved = result;
+    }
+
+    function getIdeaDetails() public view returns (string memory, string memory, string memory) {
+        Mind contractMind = Mind(contractAddress);
+        return (contractMind.ideaname(), contractMind.description(), contractMind.domain());
+    }
+}
+
+contract IdeaDisplay {
+    struct InvestorInfo {
+        string name;
+        uint investment;
+        uint period; // Investment period in years
+    }
+
+    struct FractionalInvestorInfo {
+        string name;
+        uint investment;
+        uint period; // Investment period in years
+    }
+
+    ApprovalProcess public approvalProcess;
+    mapping(address => InvestorInfo) public investors;
+    mapping(uint => address) public investorAddresses;
+    mapping(address => FractionalInvestorInfo) public fractionalInvestors;
+    mapping(uint => address) public fractionalInvestorAddresses;
+    uint public totalInvestment;
+    uint public defaultInvestAmount = 2 ether;
+    uint public investorIdCounter;
+    uint public fractionalInvestorIdCounter;
+    address public owner;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only the owner can call this function");
+        _;
+    }
+
+    constructor(address _approvalProcess) {
+        approvalProcess = ApprovalProcess(_approvalProcess);
+        investorIdCounter = 1;
+        fractionalInvestorIdCounter = 1;
+        owner = msg.sender;
+    }
+
+    function displayIdea() public view returns (string memory, string memory, string memory) {
+        require(keccak256(bytes(approvalProcess.approved())) == keccak256(bytes("yes")), "Patent not approved yet");
+        Mind contractMind = Mind(approvalProcess.contractAddress());
+        return (contractMind.ideaname(), contractMind.description(), contractMind.domain());
+    }
+
+    function invest(string memory investorName, uint investmentPeriod) public payable {
+        require(msg.value > 0, "Investment amount should be greater than zero");
+        require(keccak256(bytes(approvalProcess.approved())) == keccak256(bytes("yes")), "Cannot invest until the patent is approved");
+
+        if (investmentPeriod == 0) {
+            // Full Investment
+            if (bytes(investors[msg.sender].name).length == 0) {
+                investors[msg.sender].name = investorName;
+                investors[msg.sender].investment = msg.value;
+                investorAddresses[investorIdCounter] = msg.sender;
+                investorIdCounter++;
+            } else {
+                investors[msg.sender].investment += msg.value;
+            }
+        } else {
+            // Fractional Investment
+            if (bytes(fractionalInvestors[msg.sender].name).length == 0) {
+                fractionalInvestors[msg.sender].name = investorName;
+                fractionalInvestors[msg.sender].investment = msg.value;
+                fractionalInvestors[msg.sender].period = investmentPeriod;
+                fractionalInvestorAddresses[fractionalInvestorIdCounter] = msg.sender;
+                fractionalInvestorIdCounter++;
+            } else {
+                fractionalInvestors[msg.sender].investment += msg.value;
+            }
+        }
+
+        totalInvestment += msg.value;
+    }
+
+    function getInvestorId(address investor) public view returns (uint) {
+        for (uint i = 1; i < investorIdCounter; i++) {
+            if (investorAddresses[i] == investor) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    function getFractionalInvestorId(address fractionalInvestor) public view returns (uint) {
+        for (uint i = 1; i < fractionalInvestorIdCounter; i++) {
+            if (fractionalInvestorAddresses[i] == fractionalInvestor) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    function getInputNameFromFractionalOwners() public view returns (string memory) {
+        // Get the list of fractional owners
+        uint[] memory fractionalOwners = new uint[](fractionalInvestorIdCounter);
+
+        for (uint i = 1; i < fractionalInvestorIdCounter; i++) {
+            fractionalOwners[i] = i;
+        }
+
+        // If there are no fractional owners, return an empty string
+        if (fractionalOwners.length == 0) {
+            return "";
+        }
+
+        // Get the name of the first fractional owner
+        string memory name = fractionalInvestors[fractionalInvestorAddresses[fractionalOwners[0]]].name;
+
+        // Return the name
+        return name;
+    }
+  
+    function updateFractionalInvestorInfo(string memory investorName, uint investmentPeriod) public {
+        require(keccak256(bytes(approvalProcess.approved())) == keccak256(bytes("yes")), "Cannot update fractional investor info until the patent is approved");
+        require(investmentPeriod > 0, "Investment period should be greater than zero");
+        require(bytes(investorName).length > 0, "Investor name should not be empty");
+
+        FractionalInvestorInfo storage investor = fractionalInvestors[msg.sender];
+        investor.name = investorName;
+        investor.period = investmentPeriod;
+    }
+
+    function transferOwnership(address newOwner) public onlyOwner {
+        require(newOwner != address(0), "Invalid address");
+        owner = newOwner;
+    }
+}
